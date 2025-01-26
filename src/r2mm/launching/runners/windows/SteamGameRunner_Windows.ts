@@ -8,6 +8,7 @@ import LoggerProvider, { LogSeverity } from '../../../../providers/ror2/logging/
 import { exec } from 'child_process';
 import GameInstructions from '../../instructions/GameInstructions';
 import GameInstructionParser from '../../instructions/GameInstructionParser';
+import FsProvider from '../../../../providers/generic/file/FsProvider';
 
 export default class SteamGameRunner_Windows extends GameRunnerProvider {
 
@@ -30,21 +31,28 @@ export default class SteamGameRunner_Windows extends GameRunnerProvider {
     }
 
     async start(game: Game, args: string): Promise<void | R2Error> {
-        return new Promise(async (resolve, reject) => {
+return new Promise(async (resolve, reject) => {
             const settings = await ManagerSettings.getSingleton(game);
-            const steamDir = await GameDirectoryResolverProvider.instance.getSteamDirectory();
-            if (steamDir instanceof R2Error) {
-                return resolve(steamDir);
+            let gameDir = await GameDirectoryResolverProvider.instance.getDirectory(game);
+            if (gameDir instanceof R2Error) {
+                return resolve(gameDir);
             }
 
-            LoggerProvider.instance.Log(LogSeverity.INFO, `Steam folder is: ${steamDir}`);
-            LoggerProvider.instance.Log(LogSeverity.INFO, `Running command: ${steamDir}.exe -applaunch ${game.activePlatform.storeIdentifier} ${args} ${settings.getContext().gameSpecific.launchParameters}`);
+            gameDir = await FsProvider.instance.realpath(gameDir);
 
-            exec(`"${steamDir}/Steam.exe" -applaunch ${game.activePlatform.storeIdentifier} ${args} ${settings.getContext().gameSpecific.launchParameters}`, (err => {
+            const gameExecutable = (await FsProvider.instance.readdir(gameDir))
+                .filter((x: string) => game.exeName.includes(x))[0];
+
+            LoggerProvider.instance.Log(LogSeverity.INFO, `Running command: ${gameDir}/${gameExecutable} ${args} ${settings.getContext().gameSpecific.launchParameters}`);
+
+            const childProcess = exec(`"${gameExecutable}" ${args} ${settings.getContext().gameSpecific.launchParameters}`, {
+                cwd: gameDir,
+                windowsHide: false,
+            }, (err => {
                 if (err !== null) {
                     LoggerProvider.instance.Log(LogSeverity.ACTION_STOPPED, 'Error was thrown whilst starting modded');
                     LoggerProvider.instance.Log(LogSeverity.ERROR, err.message);
-                    const r2err = new R2Error('Error starting Steam', err.message, 'Ensure that the Steam folder has been set correctly in the settings');
+                    const r2err = new R2Error('Error starting the game', err.message, 'Ensure that the game folder has been set correctly in the settings');
                     return reject(r2err);
                 }
                 return resolve();
